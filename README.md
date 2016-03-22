@@ -54,3 +54,14 @@ topへのポインタとbottomへのポインタを管理。bottomはアンダ�
     * compiling modeでは 実行時にその数字をstackに積む code をcompile(LITERALの定義を見てごらん)
     * 1へ
 4. 辞書にもない、数字でもない。 → abort
+
+### VM 
+
+データスタックとリターンスタックをもつ
+命令列中のポインタ(Instruction pointer)
+
+------
+
+## 実装についてのメモ
+
+dictionaryは連想リスト

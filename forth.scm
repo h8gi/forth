@@ -54,13 +54,12 @@
     (values push! pop! clear show)))
 
 (define-values (d-push! d-pop! d-clear! d-show) (make-stack 30000))
-(define-values (r-push! r-pop! r-clear! _) (make-stack 128))
+(define-values (r-push! r-pop! r-clear! r-show) (make-stack 128))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; DICTIONARY 辞書の検索とか
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (define (make-entry name proc)
   (cons name proc))
 (define (entry-name entry)
@@ -68,43 +67,94 @@
 (define (entry-body entry)
   (cdr entry))
 
-
+;;; 2項演算子用 -や/の順序に対応
 (define (binary-op op)
   (lambda ()
     (let ([tos (d-pop!)]
           [sos (d-pop!)])
       (d-push! (op sos tos)))))
-(define global-dictonary
-  (list
-   (make-entry ".s" d-show)
-   (make-entry "."  (lambda ()
-                      (display (d-pop!))
-                      (newline)))
-   (make-entry "dup" (lambda ()
-                       (let ([val (d-pop!)])
-                         (d-push! val)
-                         (d-push! val))))
-   (make-entry "clear" d-clear!)
-   (make-entry "+" (binary-op +))
-   (make-entry "*" (binary-op *))
-   (make-entry "-" (binary-op -))
-   (make-entry "/" (binary-op /))
+
+;;; (コメント 閉括弧はスペースいらず
+(define (skip-comment)
+  (let ([ch (read-char)])
+    (cond [(or (eof-object? ch)
+               (char=? #\) ch))
+           'done]
+          [else (skip-comment)])))
+;;; .(コメント
+(define (display-comment)
+  (let ([ch (read-char)])
+    (cond [(or (eof-object? ch)
+               (char=? #\) ch))
+           'done]
+          [else (display ch) (display-comment)])))
+;;; \コメント
+(define (skip-online-comment)
+  (let ([ch (read-char)])
+    (cond [(or (eof-object? ch)
+               (char=? #\newline ch))
+           'done]
+          [else (skip-online-comment)])))
+
+(define-syntax make-dictionary
+  (syntax-rules ()
+    [(_ (name body) ...)
+     (list (make-entry name body) ...)]))
+
+(define global-dictonary  
+  (make-dictionary
+   ;; stack manipulate
+   (".s" d-show)
+   ("."  (lambda ()
+           (display (d-pop!))
+           (newline)))
+   ("dup" (lambda ()
+            (let ([val (d-pop!)])
+              (d-push! val)
+              (d-push! val))))
+   ("clear" d-clear!)
+   ;; arithmatic op
+   ("+" (binary-op +))
+   ("*" (binary-op *))
+   ("-" (binary-op -))
+   ("/" (binary-op /))
+   ;; comment
+   ("(" skip-comment)
+   (".(" display-comment)
+   ("\\" skip-online-comment)
    ))
 
-
 (define (search-dictionary dict word-name)
-  (cond [(assoc word-name dict) => (lambda (entry) ((entry-body entry)))]
-        [(string->number word-name) => (lambda (num)
-                                         (d-push! num))]
+  (assoc word-name dict string-ci=?))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; INTERPRETER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (forth-abort #!optional (msg ""))
+  (d-clear!)
+  (r-clear!)
+  (fprintf (current-error-port) "FORTH ERROR: ~A\n" msg))
+
+(define (forth-eval-token token dict)
+  (cond [(search-dictionary dict token)
+         => (lambda (entry) ((entry-body entry)))]
+        [(string->number token)
+         => (lambda (num)
+              (d-push! num))]
         [else (d-clear!)
-              (display "ERROR: " word-name)
+              (forth-abort token)
               (newline)]))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; TEST DRIVER
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (forth-loop)
+  (let loop ([tkn (next-token)])
+    (when tkn
+      (forth-eval-token tkn global-dictonary)
+      (loop (next-token)))))
 
-(define (test str)
+
+(define (lexer-test str)
   (with-input-from-string str
     (lambda ()
       (let loop ([tkn (next-token)])
@@ -112,10 +162,11 @@
           (pp tkn)
           (loop (next-token)))))))
 
+
 (define (forth-load-file name)
   (with-input-from-file name
-    (lambda ()
-      (let loop ([tkn (next-token)])
-        (when tkn
-          (search-dictionary global-dictonary tkn)
-          (loop (next-token)))))))
+    forth-loop))
+
+(define (forth-eval-string str)
+  (with-input-from-string str
+    forth-loop))
