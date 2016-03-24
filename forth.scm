@@ -94,6 +94,8 @@
   (fourth entry))
 (define (entry-execute entry)
   ((entry-body entry)))
+(define (entry-set-immediate! entry)
+  (set! (third entry) #t))
 (define-syntax make-dictionary
   (syntax-rules ()
     [(_ (name body ...) ...)
@@ -102,7 +104,6 @@
   (syntax-rules ()
     [(_ entry dict)
      (set! dict (cons entry dict))]))
-
 
 ;;; 2項演算子用 -や/の順序に対応
 (define (binary-op op)
@@ -161,6 +162,15 @@
   (current-state 'interpret)
   'done)
 
+;;; for compile number
+(define (compile-num num)
+  (compile-stack-push!
+   (lambda () (d-push! num))))
+
+;;; literal
+(define (literal)
+  (compile-num (d-pop!)))
+
 ;;; control structure ------------------------------
 ;;; if
 
@@ -192,17 +202,33 @@
    ;("create" )
    (":" colon-define)
    (";" semicolon
-    #:immediate #t)
+    #:immediate #t
+    #:compile-only #t)
    ;; if compile時の意味を考えればよい
    ;; endifまでを一纏めにする
    ;; ("if" (lambda ()
-   ;;         (let loop ([tkn (next-token)]
-   ;;                    [true-clause '()]
-   ;;                    [false-clause '()])
-   ;;           (when tkn
-   ;;             (cond [(string-ci=? tkn "else")]))))
+   ;;         )
    ;;  #:immediate #t
    ;;  #:compile-only #t)
+
+   ("[" (lambda () (current-state 'interpret))
+    #:immediate #t)
+   ("]" (lambda () (current-state 'compile)))
+   ("literal" literal
+    #:immediate #t
+    #:compile-only #t)
+
+   ("immediate" (lambda ()
+                  (entry-set-immediate! (car global-dictonary))))
+   ;; 実行時の挙動
+   ("postpone" (lambda ()
+                 (let ([tkn (next-token)])
+                   (if tkn
+                       (compile-stack-push!
+                        ;; コンパイル時の挙動を定義にcompile
+                        (lambda () (forth-compile tkn global-dictonary)))
+                       'done)))
+    #:immediate #t)
    ))
 
 (define (search-dictionary dict word-name)
@@ -220,6 +246,8 @@
             msgs)
   (newline (current-error-port)))
 
+
+
 (define (forth-interpret token dict)
   (cond [(search-dictionary dict token)
          => (lambda (entry) (entry-execute entry))]
@@ -236,9 +264,7 @@
                   (entry-execute entry)
                   (compile-stack-push! (entry-body entry))))]
         [(string->number token)
-         => (lambda (num)
-              (compile-stack-push! (lambda ()
-                                  (d-push! num))))]
+         => compile-num]
         [else (d-clear!)
               (forth-abort "compile state error" token)
               (current-state 'interpret)]))

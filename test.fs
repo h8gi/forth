@@ -1,16 +1,7 @@
-1 2 3 .s
-+ .s
-* .s
-clear .s
-
-( hello hello) .s
-.( hello hello)
-\ hello 
-1 2 3 .s
-clear
+: push-10 10 ;
+: hoge POSTPONE push-10 ; immediate
+: a hoge ; ( a push-10 )
 .s
-: hello .( this is comment )
-    10 20 30 ;
-hello 
+a 
 .s
-clear
+a
