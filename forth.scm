@@ -12,13 +12,6 @@
 (define (interpret?)
   (eq? (current-state) 'interpret))
 
-;;; for word definition
-(define compile-stack (make-parameter '()))
-(define (compile-stack-push! proc)
-  (compile-stack (cons proc (compile-stack))))
-(define (compile-stack-clear!)
-  (compile-stack '()))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; LEXER?
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -38,7 +31,8 @@
            (let loop ([first-char (peek-char)]
                       [str ""])
              (cond
-              [(or (eof-object? first-char) (space-char? first-char)) str]
+              [(or (eof-object? first-char) (space-char? first-char))
+               (read-char) str]
               [else
                (read-char)
                (loop (peek-char) (conc str first-char))]))]
@@ -57,7 +51,8 @@
         [pointer 0])
     (define (push! val)
       (vector-set! stk pointer val)
-      (set! pointer (add1 pointer)))
+      (set! pointer (add1 pointer))
+      val)
     (define (pop!)
       (set! pointer (sub1 pointer))
       (vector-ref stk pointer))
@@ -68,11 +63,36 @@
       (do ([i 0 (add1 i)])
           ((<= pointer i) (newline))
         (printf "~A " (vector-ref stk i))))
-    (values push! pop! clear show)))
+    (define (stack-ref i)
+      (vector-ref stk i))
+    (define (stack-set! i val)
+      (vector-set! stk i val))
+    (define p
+      (lambda () pointer))
+    (values push! pop! clear show stack-ref stack-set! p)))
 
-(define-values (d-push! d-pop! d-clear! d-show) (make-stack 30000))
-(define-values (r-push! r-pop! r-clear! r-show) (make-stack 128))
-
+(define-values (d-push! d-pop! d-clear! d-show _ _ _) (make-stack 30000))
+(define-values (r-push! r-pop! r-clear! r-show _ _ _) (make-stack 128))
+(define-values (compile-stack-push!
+                compile-stack-pop! compile-stack-clear!
+                compile-stack-show
+                compile-stack-ref compile-stack-set! compile-stack-pointer)
+  (make-stack 30000))
+(define memory (make-vector 50000 0))
+;;; for word definition
+;;; convert compile stack to entry
+;;;  (proc ... name) -> (make-entry name new-proc)
+(define (compile-stack->entry)
+  (let* ([p (compile-stack-pointer)]
+         [vect (make-vector p)])
+    (do ([i 0 (add1 i)])
+        ((<= p i))
+      (vector-set! vect i (compile-stack-ref i)))
+    (make-entry (vector-ref vect 0)
+                (lambda ()
+                  (do ([i 1 (add1 i)])
+                      ((<= p i))
+                    ((vector-ref vect i)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; DICTIONARY 辞書の検索とか
@@ -81,8 +101,9 @@
 ;;; 実行時のprocとcompile時のprocを指定
 (define (make-entry name proc #!key
                     (immediate #f)
-                    (compile-only #f))
-  (list name proc immediate compile-only))
+                    (compile-only #f)
+                    (compilation #f))
+  (list name proc immediate compile-only compilation))
 
 (define (entry-name entry)
   (first entry))
@@ -92,6 +113,8 @@
   (third entry))
 (define (entry-compile-only? entry)
   (fourth entry))
+(define (entry-compilation entry)
+  (fifth entry))
 (define (entry-execute entry)
   ((entry-body entry)))
 (define (entry-set-immediate! entry)
@@ -102,8 +125,8 @@
      (list (make-entry name body ...) ...)]))
 (define-syntax dictionary-push!
   (syntax-rules ()
-    [(_ entry dict)
-     (set! dict (cons entry dict))]))
+    [(_ entry)
+     (set! global-dictionary (cons entry global-dictionary))]))
 
 ;;; 2項演算子用 -や/の順序に対応
 (define (binary-op op)
@@ -116,16 +139,17 @@
 (define (skip-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? #\) ch))
+               (char=? ch #\) ch))
            'done]
           [else (skip-comment)])))
 ;;; .(コメント
 (define (display-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? #\) ch))
+               (char=? ch #\) ch))
            'done]
           [else (display ch) (display-comment)])))
+
 ;;; \コメント
 (define (skip-online-comment)
   (let ([ch (read-char)])
@@ -133,6 +157,21 @@
                (char=? #\newline ch))
            'done]
           [else (skip-online-comment)])))
+;;; ."
+(define (display-string)
+  (let ([ch (read-char)])
+    (cond [(or (eof-object? ch)
+               (char=? ch #\"))
+           'done]
+          [else (display ch) (display-string)])))
+
+(define (compile-display-string)
+  (let loop ([ch (read-char)]
+             [str ""])
+    (cond [(or (eof-object? ch)
+               (char=? ch #\"))
+           (compile-stack-push! (lambda () (display str)))]
+          [else (loop (read-char) (conc str ch))])))
 
 ;;; compile word ------------------------------
 ;;; : colon
@@ -144,21 +183,19 @@
            (current-state 'compile)     ; start compile
            ]
           [else 'done])))
-;;; convert compile stack to entry
-;;;  (proc ... name) -> (make-entry name new-proc)
-(define (compile-stack->entry)
-  (let* ([stk (reverse! (compile-stack))]
-         [name (car stk)]
-         [proc-list (cdr stk)]
-         [body (lambda ()
-                 (for-each (lambda (proc)
-                             (proc))
-                           proc-list))]
-         [entry (make-entry name body)])
-    entry))
+
+(define-syntax define-forth-word
+  (syntax-rules ()
+    [(_ name tkn ...)
+     (begin
+       (with-input-from-string name
+         (lambda () (forth-eval-token ":")))
+       (for-each (cut forth-eval-token <>) '(tkn ...))
+       (forth-eval-token ";"))]))
+
 ;;; ; end compile
 (define (semicolon)
-  (dictionary-push! (compile-stack->entry) global-dictonary)
+  (dictionary-push! (compile-stack->entry))
   (current-state 'interpret)
   'done)
 
@@ -171,10 +208,14 @@
 (define (literal)
   (compile-num (d-pop!)))
 
+(define (forth-false?)
+  (zero? (d-pop!)))
+(define (forth-true?)
+  (complement forth-false?))
 ;;; control structure ------------------------------
 ;;; if
 
-(define global-dictonary  
+(define global-dictionary  
   (make-dictionary
    ;; stack manipulate
    (".s" d-show)
@@ -185,6 +226,11 @@
             (let ([val (d-pop!)])
               (d-push! val)
               (d-push! val))))
+   ("swap" (lambda ()
+             (let ([tos (d-pop!)]
+                   [nos (d-pop!)])
+               (d-push! tos)
+               (d-push! nos))))
    ("clear" d-clear!)
    ;; arithmatic op
    ("+" (binary-op +))
@@ -198,19 +244,43 @@
     #:immediate #t)
    ("\\" skip-online-comment
     #:immediate #t)
+   (".\"" display-string
+    #:compilation compile-display-string)
    ;; compile word
    ;("create" )
    (":" colon-define)
    (";" semicolon
     #:immediate #t
     #:compile-only #t)
+   ;; (n -- )
+   (">r" (lambda ()
+           (r-push! (d-pop!))))
+   ;; ( -- n)
+   ("r>" (lambda ()
+           (d-push! (r-pop!))))
+   ;; (-- n)
+   ("r@" (lambda ()
+           (d-push! (r-push! (r-pop!)))))
    ;; if compile時の意味を考えればよい
-   ;; endifまでを一纏めにする
-   ;; ("if" (lambda ()
-   ;;         )
-   ;;  #:immediate #t
-   ;;  #:compile-only #t)
-
+   ;; 「0であれば次のelse or thenまでジャンプ」をコンパイルする
+   ("if" (lambda ()
+           (compile-stack-push!
+            (cons 'if (lambda (jump-to)
+                        (lambda ()
+                          (if (forth-true?)
+                              'done
+                              (jump-to)))))))
+    #:immediate #t
+    #:compile-only #t)
+   ("then" (lambda ()             
+             (do ([i (sub1 (compile-stack-pointer)) (sub1 i)])
+                 ((< i 0))
+               (let ([item (compile-stack-ref i)])
+                 (if (and (pair? item)
+                          (eq? (car item) 'if))
+                     ((cdr item)  (lambda ))))))
+    #:immediate #t
+    #:compile-only #t)
    ("[" (lambda () (current-state 'interpret))
     #:immediate #t)
    ("]" (lambda () (current-state 'compile)))
@@ -219,20 +289,22 @@
     #:compile-only #t)
 
    ("immediate" (lambda ()
-                  (entry-set-immediate! (car global-dictonary))))
+                  (entry-set-immediate! (car global-dictionary))))
    ;; 実行時の挙動
    ("postpone" (lambda ()
                  (let ([tkn (next-token)])
                    (if tkn
                        (compile-stack-push!
                         ;; コンパイル時の挙動を定義にcompile
-                        (lambda () (forth-compile tkn global-dictonary)))
+                        (lambda () (forth-compile tkn)))
                        'done)))
     #:immediate #t)
    ))
 
-(define (search-dictionary dict word-name)
-  (assoc word-name dict string-ci=?))
+(define (search-dictionary word-name)
+  (assoc word-name global-dictionary string-ci=?))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; INTERPRETER
@@ -246,10 +318,8 @@
             msgs)
   (newline (current-error-port)))
 
-
-
-(define (forth-interpret token dict)
-  (cond [(search-dictionary dict token)
+(define (forth-interpret token)
+  (cond [(search-dictionary token)
          => (lambda (entry) (entry-execute entry))]
         [(string->number token)
          => (lambda (num)
@@ -257,12 +327,13 @@
         [else (d-clear!)
               (forth-abort token)]))
 
-(define (forth-compile token dict)
-  (cond [(search-dictionary dict token)
+(define (forth-compile token)
+  (cond [(search-dictionary token)
          => (lambda (entry)
-              (if (entry-immediate? entry)
-                  (entry-execute entry)
-                  (compile-stack-push! (entry-body entry))))]
+              (cond [(entry-immediate? entry)
+                     (entry-execute entry)]
+                    [(entry-compilation entry) => (lambda (xt) (xt))]
+                    [else (compile-stack-push! (entry-body entry))]))]
         [(string->number token)
          => compile-num]
         [else (d-clear!)
@@ -270,15 +341,15 @@
               (current-state 'interpret)]))
 
 
-(define (forth-eval-token token dict)
+(define (forth-eval-token token)
   (if (compile?)
-      (forth-compile token dict)
-      (forth-interpret token dict)))
+      (forth-compile token)
+      (forth-interpret token)))
 
 (define (forth-loop)
   (let loop ([tkn (next-token)])
     (when tkn
-      (forth-eval-token tkn global-dictonary)
+      (forth-eval-token tkn)
       (loop (next-token)))))
 
 
@@ -298,3 +369,5 @@
 (define (forth-eval-string str)
   (with-input-from-string str
     forth-loop))
+
+
