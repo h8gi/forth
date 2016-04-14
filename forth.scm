@@ -1,7 +1,7 @@
 ;;; forth.scm
 ;;; インタープリタにしましょう
 ;;; token 
-(use srfi-14 vector-lib shift-reset)
+(use srfi-14 vector-lib)
 (import-for-syntax matchable)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; GLOBAL
@@ -95,23 +95,7 @@
 ;;; for word definition
 ;;; convert compile stack to entry
 ;;;  (proc ... name) -> (make-entry name new-proc)
-;; (define (compile-stack->entry)
-;;   (let* ([p (compile-stack-pointer)]
-;;          [vect (make-vector p)])
-;;     (do ([i 0 (add1 i)])
-;;         ((<= p i))
-;;       (vector-set! vect i (compile-stack-ref i)))
-;;     (make-entry (vector-ref vect 0)
-;;                 (lambda ()
-;;                   (do ([i 1 (add1 i)])
-;;                       ((<= p i))
-;;                     ((vector-ref vect i)))))))
-(define (compile-stack->entry)
-  (let ([name (compile-stack-ref 0)]
-	[vect (compile-stack-copy 1 (compile-stack-pointer))])
-    (make-entry name
-		(lambda ()
-		  (vector-for-each (lambda (i x) (x)) vect)))))
+;;; 各ワード呼び出しで*pc*を使う
 (define *pc* 0)
 (define (compile-stack->entry)
   (let ([name (compile-stack-ref 0)]
@@ -174,14 +158,14 @@
 (define (skip-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? ch #\) ch))
+               (char=? ch #\)))
            'done]
           [else (skip-comment)])))
 ;;; .(コメント
 (define (display-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? ch #\) ch))
+               (char=? ch #\)))
            'done]
           [else (display ch) (display-comment)])))
 
@@ -257,6 +241,8 @@
    ("."  (lambda ()
            (display (d-pop!))
            (newline)))
+   ("drop" (lambda ()
+	     (d-pop!)))
    ("dup" (lambda ()
             (let ([val (d-pop!)])
               (d-push! val)
@@ -272,6 +258,16 @@
    ("*" (binary-op *))
    ("-" (binary-op -))
    ("/" (binary-op /))
+   ("<" (binary-op (compose (lambda (b) (if b -1 0))
+			    <)))
+   ("<=" (binary-op (compose (lambda (b) (if b -1 0))
+			    <=)))
+   (">" (binary-op (compose (lambda (b) (if b -1 0))
+			    >)))
+   (">=" (binary-op (compose (lambda (b) (if b -1 0))
+			     >=)))
+   ("=" (binary-op (compose (lambda (b) (if b -1 0))
+			    =)))    
    ;; comment
    ("(" skip-comment
     #:immediate #t)
@@ -309,10 +305,22 @@
     #:compile-only #t)
    ;; return stack の位置にある 関数へ 飛び先(ココ)を教える
    ("then" (lambda ()
-   	     (let ([if-pos (r-pop!)]
-   		   [then-pos (- (compile-stack-pointer) 2)])
-   	       (compile-stack-set! if-pos ((compile-stack-ref if-pos) then-pos))
+   	     (let ([if-or-else-pos (r-pop!)]
+   		   [then-pos (- (compile-stack-pointer) 2)]) ; 直後のadd1と、nameの分?
+   	       (compile-stack-set! if-or-else-pos ((compile-stack-ref if-or-else-pos) then-pos))
    	       'done))
+    #:immediate #t
+    #:compile-only #t)
+   ;; return stak の位置にある 関数へ 飛び先を教えつつ、
+   ("else" (lambda ()
+	     (let ([if-pos (r-pop!)]
+		   [else-pos (- (compile-stack-pointer) 1)])
+	       (r-push! (compile-stack-pointer))
+	       (compile-stack-set! if-pos ((compile-stack-ref if-pos) else-pos))
+	       (compile-stack-push!
+		(lambda (jump-to)
+		  (lambda ()
+		    (set! *pc* jump-to))))))
     #:immediate #t
     #:compile-only #t)
    ("[" (lambda () (current-state 'interpret))
@@ -342,7 +350,7 @@
 
 (forth-eval-string "0 constant false")
 (forth-eval-string  "-1 constant true")
-   
+
 
 (define (search-dictionary word-name)
   (assoc word-name global-dictionary string-ci=?))
