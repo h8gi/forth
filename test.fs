@@ -1,3 +1,4 @@
+clear
 : push-10 10 ;
 : hoge POSTPONE push-10 ; immediate
 : a hoge ; ( a push-10 )
@@ -23,4 +24,5 @@
 
 30 elsif-test
 
+: hoge ." foo"  ;
 

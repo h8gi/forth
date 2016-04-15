@@ -342,14 +342,13 @@
    ("compile-only" (lambda ()
 		     (entry-set-compile-only! (car global-dictionary))))
    ;; 実行時の挙動
-
    ("postpone" (lambda ()
-		 (let ([tkn (next-token)])
-		   (if tkn
-		       (compile-stack-push!
-			;; コンパイル時の挙動を定義にcompile
-			(lambda () (forth-compile tkn)))
-		       'done)))
+                 (let ([tkn (next-token)])
+                   (if tkn
+                       (compile-stack-push!
+                        ;; コンパイル時の挙動を定義にcompile
+                        (lambda () (forth-compile tkn)))
+                       'done)))
     #:immediate #t)
    ("constant" (lambda ()
 		 (let ([name (next-token)])
