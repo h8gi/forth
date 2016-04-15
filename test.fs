@@ -1,7 +1,11 @@
 clear
 : push-10 10 ;
+
 : hoge POSTPONE push-10 ; immediate
+
 : a hoge ; ( a push-10 )
+
+
 
 : elsif-test
     dup 10 <
@@ -26,3 +30,9 @@ clear
 
 : hoge ." foo"  ;
 
+
+." foo"
+
+: hoge + * ;
+: hello POSTPONE then ; immediate compile-only
+: hoge POSTPONE if ; immediate
