@@ -1,7 +1,8 @@
 ;;; forth.scm
 ;;; インタープリタにしましょう
 ;;; token 
-
+(use srfi-14)
+(import-for-syntax matchable)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; GLOBAL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -69,30 +70,47 @@
       (vector-set! stk i val))
     (define p
       (lambda () pointer))
-    (values push! pop! clear show stack-ref stack-set! p)))
+    (define (copy start end)
+      (let ([vect (make-vector (- end start))])
+	(do ([i start (add1 i)]
+	     [c 0 (add1 c)])
+	    ((<= end i) vect)
+	  (vector-set! vect c (vector-ref stk i)))))
+    (values push! pop! clear show stack-ref stack-set! p copy)))
 
-(define-values (d-push! d-pop! d-clear! d-show _ _ _) (make-stack 30000))
-(define-values (r-push! r-pop! r-clear! r-show _ _ _) (make-stack 128))
-(define-values (compile-stack-push!
-                compile-stack-pop! compile-stack-clear!
-                compile-stack-show
-                compile-stack-ref compile-stack-set! compile-stack-pointer)
-  (make-stack 30000))
+(define-syntax define-stack
+  (ir-macro-transformer
+   (lambda (expr inject compare)
+     (match expr
+       [(_ name len)
+	(let ([name-list (map (compose string->symbol (lambda (desc)
+							(conc (inject name) "-" desc)))
+			      '(push! pop! clear! show ref set! pointer copy))])
+	  `(define-values ,name-list (make-stack ,len)))]))))
+
+(define-stack d 30000)
+(define-stack r 128)
+(define-stack compile-stack 30000)
 (define memory (make-vector 50000 0))
 ;;; for word definition
 ;;; convert compile stack to entry
 ;;;  (proc ... name) -> (make-entry name new-proc)
+;;; 各ワード呼び出しで*pc*を使う
+(define *pc* 0)
 (define (compile-stack->entry)
-  (let* ([p (compile-stack-pointer)]
-         [vect (make-vector p)])
-    (do ([i 0 (add1 i)])
-        ((<= p i))
-      (vector-set! vect i (compile-stack-ref i)))
-    (make-entry (vector-ref vect 0)
-                (lambda ()
-                  (do ([i 1 (add1 i)])
-                      ((<= p i))
-                    ((vector-ref vect i)))))))
+  (let ([name (compile-stack-ref 0)]
+	[vect (compile-stack-copy 1 (compile-stack-pointer))]
+	[lim  (sub1 (compile-stack-pointer))])
+    (make-entry name
+		(lambda ()
+		  (set! *pc* 0)
+		  (let loop ()
+		    (cond [(< *pc* lim)
+			   ((vector-ref vect *pc*))
+			   (set! *pc* (add1 *pc*))
+			   (loop)]
+			  [else 'done]))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; DICTIONARY 辞書の検索とか
@@ -100,9 +118,9 @@
 
 ;;; 実行時のprocとcompile時のprocを指定
 (define (make-entry name proc #!key
-                    (immediate #f)
-                    (compile-only #f)
-                    (compilation #f))
+		    (immediate #f)
+		    (compile-only #f)
+		    (compilation #f))
   (list name proc immediate compile-only compilation))
 
 (define (entry-name entry)
@@ -139,14 +157,14 @@
 (define (skip-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? ch #\) ch))
+               (char=? ch #\)))
            'done]
           [else (skip-comment)])))
 ;;; .(コメント
 (define (display-comment)
   (let ([ch (read-char)])
     (cond [(or (eof-object? ch)
-               (char=? ch #\) ch))
+               (char=? ch #\)))
            'done]
           [else (display ch) (display-comment)])))
 
@@ -222,6 +240,8 @@
    ("."  (lambda ()
            (display (d-pop!))
            (newline)))
+   ("drop" (lambda ()
+	     (d-pop!)))
    ("dup" (lambda ()
             (let ([val (d-pop!)])
               (d-push! val)
@@ -237,6 +257,16 @@
    ("*" (binary-op *))
    ("-" (binary-op -))
    ("/" (binary-op /))
+   ("<" (binary-op (compose (lambda (b) (if b -1 0))
+			    <)))
+   ("<=" (binary-op (compose (lambda (b) (if b -1 0))
+			    <=)))
+   (">" (binary-op (compose (lambda (b) (if b -1 0))
+			    >)))
+   (">=" (binary-op (compose (lambda (b) (if b -1 0))
+			     >=)))
+   ("=" (binary-op (compose (lambda (b) (if b -1 0))
+			    =)))    
    ;; comment
    ("(" skip-comment
     #:immediate #t)
@@ -264,21 +294,32 @@
    ;; if compile時の意味を考えればよい
    ;; 「0であれば次のelse or thenまでジャンプ」をコンパイルする
    ("if" (lambda ()
+	   (r-push! (compile-stack-pointer))
            (compile-stack-push!
-            (cons 'if (lambda (jump-to)
-                        (lambda ()
-                          (if (forth-true?)
-                              'done
-                              (jump-to)))))))
+            (lambda (jump-to)
+   	      (lambda ()
+   		(when (forth-false?)
+		  (set! *pc* jump-to))))))
     #:immediate #t
     #:compile-only #t)
-   ("then" (lambda ()             
-             (do ([i (sub1 (compile-stack-pointer)) (sub1 i)])
-                 ((< i 0))
-               (let ([item (compile-stack-ref i)])
-                 (if (and (pair? item)
-                          (eq? (car item) 'if))
-                     ((cdr item)  (lambda ))))))
+   ;; return stack の位置にある 関数へ 飛び先(ココ)を教える
+   ("then" (lambda ()
+   	     (let ([if-or-else-pos (r-pop!)]
+   		   [then-pos (- (compile-stack-pointer) 2)]) ; 直後のadd1と、nameの分?
+   	       (compile-stack-set! if-or-else-pos ((compile-stack-ref if-or-else-pos) then-pos))
+   	       'done))
+    #:immediate #t
+    #:compile-only #t)
+   ;; return stak の位置にある 関数へ 飛び先を教えつつ、
+   ("else" (lambda ()
+	     (let ([if-pos (r-pop!)]
+		   [else-pos (- (compile-stack-pointer) 1)])
+	       (r-push! (compile-stack-pointer))
+	       (compile-stack-set! if-pos ((compile-stack-ref if-pos) else-pos))
+	       (compile-stack-push!
+		(lambda (jump-to)
+		  (lambda ()
+		    (set! *pc* jump-to))))))
     #:immediate #t
     #:compile-only #t)
    ("[" (lambda () (current-state 'interpret))
@@ -299,12 +340,16 @@
                         (lambda () (forth-compile tkn)))
                        'done)))
     #:immediate #t)
-   ))
+   ("constant" (lambda ()
+		 (let ([name (next-token)])
+		   (dictionary-push!
+		    (make-entry name (let ([val (d-pop!)])
+				       (lambda () (d-push! val))))))))))
 
+(forth-eval-string "0 constant false")
+(forth-eval-string  "-1 constant true")
 (define (search-dictionary word-name)
   (assoc word-name global-dictionary string-ci=?))
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; INTERPRETER
