@@ -1,7 +1,7 @@
 ;;; forth.scm
 ;;; インタープリタにしましょう
 ;;; token 
-(use srfi-14)
+(use srfi-14 coops)
 (import-for-syntax matchable)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; GLOBAL
@@ -114,29 +114,34 @@
 ;;; DICTIONARY 辞書の検索とか
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define-class <entry> ()
+  ([name #:reader entry-name]
+   [body #:reader entry-body]
+   [compilation #:accessor entry-compilation
+		#:initform #f]
+   [immediate #:accessor entry-immediate?
+	      #:initform #f]
+   [compile-only #:accessor entry-compile-only?
+		 #:initform #f]))
 ;;; 実行時のprocとcompile時のprocを指定
-(define (make-entry name proc #!key
-                    (immediate #f)
-                    (compile-only #f)
-                    (compilation #f))
-  (list name proc immediate compile-only compilation))
+(define (make-entry name body #!key
+		    (immediate #f)
+		    (compile-only #f)
+		    (compilation #f))
+  (make <entry>
+    'name name
+    'body body
+    'compilation compilation
+    'immediate immediate
+    'compile-only compile-only))
 
-(define (entry-name entry)
-  (first entry))
-(define (entry-body entry)
-  (second entry))
-(define (entry-immediate? entry)
-  (third entry))
-(define (entry-compile-only? entry)
-  (fourth entry))
-(define (entry-compilation entry)
-  (fifth entry))
 (define (entry-execute entry)
   ((entry-body entry)))
 (define (entry-set-immediate! entry)
-  (set! (third entry) #t))
+  (set! (entry-immediate? entry) #t))
 (define (entry-set-compile-only! entry)
-  (set! (list-ref entry 4) #t))
+  (set! (entry-compile-only? entry) #t))
+
 (define-syntax make-dictionary
   (syntax-rules ()
     [(_ (name body ...) ...)
@@ -311,14 +316,15 @@
     #:compile-only #t)
    ;; return stak の位置にある 関数へ 飛び先を教えつつ、
    ("else" (lambda ()
-             (let ([if-pos (r-pop!)]
-                   [else-pos (- (compile-stack-pointer) 1)])
-               (r-push! (compile-stack-pointer))
-               (compile-stack-set! if-pos ((compile-stack-ref if-pos) else-pos))
-               (compile-stack-push!
-                (lambda (jump-to)
-                  (lambda ()
-                    (set! *pc* jump-to))))))
+	     (let ([if-pos (r-pop!)]
+		   [else-pos (- (compile-stack-pointer) 1)] ; else直後に そこからはジャンプしない
+		   )
+	       (r-push! (compile-stack-pointer))
+	       (compile-stack-set! if-pos ((compile-stack-ref if-pos) else-pos))
+	       (compile-stack-push!
+		(lambda (jump-to)
+		  (lambda ()
+		    (set! *pc* jump-to))))))
     #:immediate #t
     #:compile-only #t)
    ;; do
@@ -340,7 +346,7 @@
    ("immediate" (lambda ()
                   (entry-set-immediate! (car global-dictionary))))
    ("compile-only" (lambda ()
-                     (entry-set-compile-only! (car global-dictionary))))
+		     (entry-set-compile-only! (car global-dictionary))))
    ;; 実行時の挙動
    ("postpone" (lambda ()
                  (let ([tkn (next-token)])
@@ -357,7 +363,8 @@
                                        (lambda () (d-push! val))))))))))
 
 (define (search-dictionary word-name)
-  (assoc word-name global-dictionary string-ci=?))
+  (find (lambda (x) (string-ci=? word-name (entry-name x)))
+	global-dictionary))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; INTERPRETER
@@ -420,5 +427,5 @@
     forth-loop))
 
 (forth-eval-string "0 constant false")
-(forth-eval-string  "-1 constant true")
+(forth-eval-string "-1 constant true")
 (forth-eval-string ": endif postpone then ; immediate compile-only")
