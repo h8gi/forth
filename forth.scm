@@ -333,7 +333,21 @@
            (compile-stack-push!
             (lambda (jump-to)
               (lambda ()
-                (when ))))))
+                (r-push! (d-pop!))
+                (set! *pc* jump-to))))))
+   ;; loop
+   ("loop" (lambda ()
+             (let ([do-pos (r-pop!)]
+                   [loop-pos (- (compile-stack-pointer) 2)])
+               (compile-stack-set! do-pos ((compile-stack-ref do-pos) loop-pos))
+               (compile-stack-push!
+                (lambda ()
+                  (let [(start (d-pop!))
+                        (limit (d-pop!))]
+                    (unless (< nos tos)                    
+                      (set! *pc* (sub1 do-pos))
+                      (r-push! nos)
+                      (r-push! (add1 tos)))))))))
 
    ;; 10 0 do code .. loop hoge ;
    ("[" (lambda () (current-state 'interpret))
