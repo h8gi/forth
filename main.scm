@@ -67,7 +67,7 @@
     (define (show)
       (printf "<~A> " pointer)
       (do ([i 0 (add1 i)])
-          ((<= pointer i) (newline))
+          ((<= pointer i))
         (printf "~A " (vector-ref stk i))))
     (define (stack-ref i)
       (vector-ref stk i))
