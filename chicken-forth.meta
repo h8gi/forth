@@ -1,0 +1,5 @@
+;;; chicken-forth.meta
+((author "yagihiroki")
+ (synopsis "chicken-forth")
+ (license "MIT license http://opensource.org/licenses/mit-license.php")
+ (files "main.scm" "chicken-forth.scm" "chicken-forth.setup" "chicken-forth.meta"))

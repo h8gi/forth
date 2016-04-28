@@ -1,0 +1,11 @@
+;;; chicken-forth.setup
+
+;;; コンパイル
+(compile -s -O3 -d1 "chicken-forth.scm" -j chicken-forth)
+(compile -s -O3 -d0 "chicken-forth.import.scm")
+
+;;; インストール
+(install-extension
+ 'chicken-forth
+ '("chicken-forth.so" "chicken-forth.import.so")
+ '((version 1.0)))

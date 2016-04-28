@@ -1,8 +1,8 @@
 ;;; forth.scm
 ;;; インタープリタにしましょう
-;;; token 
-(use srfi-14 coops)
+;;; token
 (import-for-syntax matchable)
+(use srfi-14 coops)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; GLOBAL
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -155,8 +155,8 @@
 (define (binary-op op)
   (lambda ()
     (let ([tos (d-pop!)]
-          [sos (d-pop!)])
-      (d-push! (op sos tos)))))
+          [nos (d-pop!)])
+      (d-push! (op nos tos)))))
 
 ;;; (コメント 閉括弧はスペースいらず
 (define (skip-comment)
@@ -242,8 +242,7 @@
    ;; stack manipulate
    (".s" d-show)
    ("."  (lambda ()
-           (display (d-pop!))
-           (newline)))
+           (printf "~A " (d-pop!))))
    ("drop" (lambda ()
              (d-pop!)))
    ("dup" (lambda ()
@@ -344,10 +343,10 @@
                 (lambda ()
                   (let [(start (d-pop!))
                         (limit (d-pop!))]
-                    (unless (< nos tos)                    
+                    (unless (< limit start)
                       (set! *pc* (sub1 do-pos))
-                      (r-push! nos)
-                      (r-push! (add1 tos)))))))))
+                      (r-push! limit)
+                      (r-push! (add1 start)))))))))
 
    ;; 10 0 do code .. loop hoge ;
    ("[" (lambda () (current-state 'interpret))
@@ -386,10 +385,17 @@
 (define (forth-abort . msgs)
   (d-clear!)
   (r-clear!)
+  (current-state 'interpret)
   (display  "FORTH ERROR:" (current-error-port))
   (for-each (cut fprintf (current-error-port) " ~A" <>)
             msgs)
   (newline (current-error-port)))
+
+(define (forth-abort . msgs)
+  (d-clear!)
+  (r-clear!)
+  (current-state 'interpret)
+  (apply error msgs))
 
 (define (forth-interpret token)
   (cond [(search-dictionary token)
@@ -398,7 +404,7 @@
          => (lambda (num)
               (d-push! num))]
         [else (d-clear!)
-              (forth-abort token)]))
+              (forth-abort "Undefined word" token)]))
 
 (define (forth-compile token)
   (cond [(search-dictionary token)
@@ -410,8 +416,7 @@
         [(string->number token)
          => compile-num]
         [else (d-clear!)
-              (forth-abort "compile state error" token)
-              (current-state 'interpret)]))
+              (forth-abort "Compile error" token)]))
 
 (define (forth-eval-token token)
   (if (compile?)
@@ -437,9 +442,17 @@
     forth-loop))
 
 (define (forth-eval-string str)
-  (with-input-from-string str
-    forth-loop))
+  (handle-exceptions exn
+      (begin
+        (printf "~A: "
+                ((condition-property-accessor 'exn 'message) exn))
+        (for-each (lambda (x) (printf "~A " x)) ((condition-property-accessor 'exn 'arguments) exn))
+        (newline))
+    (with-input-from-string str
+      forth-loop)
+    (display " ok")
+    (newline)))
 
-(forth-eval-string "0 constant false")
-(forth-eval-string "-1 constant true")
-(forth-eval-string ": endif postpone then ; immediate compile-only")
+;; (forth-eval-string "0 constant false")
+;; (forth-eval-string "-1 constant true")
+;; (forth-eval-string ": endif postpone then ; immediate compile-only")

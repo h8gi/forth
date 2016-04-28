@@ -1,2 +1,5 @@
 *~
+*.so
 *.html
+*.import.scm
+*.o
