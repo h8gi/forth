@@ -50,12 +50,18 @@
   (let ([stk (make-vector depth 0)]
         [pointer 0])
     (define (push! val)
-      (vector-set! stk pointer val)
-      (set! pointer (add1 pointer))
-      val)
+      (cond [(> depth pointer)
+             (vector-set! stk pointer val)
+             (set! pointer (add1 pointer))
+             val]
+            [else
+             (forth-abort "Error" "Stack overflow")]))
     (define (pop!)
-      (set! pointer (sub1 pointer))
-      (vector-ref stk pointer))
+      (cond [(> pointer 0)
+             (set! pointer (sub1 pointer))
+             (vector-ref stk pointer)]
+            [else
+             (forth-abort "Error" "Stack underflow")]))
     (define (clear)
       (set! pointer 0))
     (define (show)
