@@ -405,7 +405,10 @@
 
 (define (forth-interpret token)
   (cond [(search-dictionary token)
-         => (lambda (entry) (entry-execute entry))]
+         => (lambda (entry)
+	      (if (entry-compile-only? entry)
+		  (forth-abort "Compile only word" token)
+		  (entry-execute entry)))]
         [(string->number token)
          => (lambda (num)
               (d-push! num))]
@@ -453,16 +456,6 @@
   (display " ok")
   (newline))
 
-
-;; (handle-exceptions exn
-;;     (begin
-;;       (printf "~A: "
-;;               ((condition-property-accessor 'exn 'message) exn))
-;;       (for-each (lambda (x) (printf "~A " x)) ((condition-property-accessor 'exn 'arguments) exn))
-;;       (newline))
-;;   (forth-eval-string str))
-
-
-;; (forth-eval-string "0 constant false")
-;; (forth-eval-string "-1 constant true")
-;; (forth-eval-string ": endif postpone then ; immediate compile-only")
+(forth-eval-string "0 constant false")
+(forth-eval-string "-1 constant true")
+(forth-eval-string ": endif postpone then ; immediate compile-only")
