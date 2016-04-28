@@ -2,4 +2,5 @@
 ((author "yagihiroki")
  (synopsis "chicken-forth")
  (license "MIT license http://opensource.org/licenses/mit-license.php")
+ (depends matchable srfi-14 coops)
  (files "main.scm" "chicken-forth.scm" "chicken-forth.setup" "chicken-forth.meta"))

@@ -442,16 +442,20 @@
     forth-loop))
 
 (define (forth-eval-string str)
-  (handle-exceptions exn
-      (begin
-        (printf "~A: "
-                ((condition-property-accessor 'exn 'message) exn))
-        (for-each (lambda (x) (printf "~A " x)) ((condition-property-accessor 'exn 'arguments) exn))
-        (newline))
-    (with-input-from-string str
-      forth-loop)
-    (display " ok")
-    (newline)))
+  (with-input-from-string str
+    forth-loop)
+  (display " ok")
+  (newline))
+
+
+;; (handle-exceptions exn
+;;     (begin
+;;       (printf "~A: "
+;;               ((condition-property-accessor 'exn 'message) exn))
+;;       (for-each (lambda (x) (printf "~A " x)) ((condition-property-accessor 'exn 'arguments) exn))
+;;       (newline))
+;;   (forth-eval-string str))
+
 
 ;; (forth-eval-string "0 constant false")
 ;; (forth-eval-string "-1 constant true")
