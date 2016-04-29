@@ -285,8 +285,11 @@
     #:immediate #t)
    (".\"" display-string
     #:compilation compile-display-string)
-   ;; compile word
-                                        ;("create" )
+   ;; words
+   ("words" (lambda ()
+   	      (for-each (compose (cut printf "~A " <>) entry-name)
+			global-dictionary)))
+   ;; compile word   
    (":" colon-define)
    (";" semicolon
     #:immediate #t
