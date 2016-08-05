@@ -12,6 +12,10 @@
   (eq? (current-state) 'compile))
 (define (interpret?)
   (eq? (current-state) 'interpret))
+(define (compile-mode)
+  (current-state 'compile))
+(define (interpret-mode)
+  (current-state 'interpret))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; LEXER?
@@ -209,7 +213,7 @@
     (cond [name
            (compile-stack-clear!)
            (compile-stack-push! name)   ; word name
-           (current-state 'compile)     ; start compile
+           (compile-mode)     ; start compile
            ]
           [else 'done])))
 
@@ -225,7 +229,7 @@
 ;;; ; end compile
 (define (semicolon)
   (dictionary-push! (compile-stack->entry))
-  (current-state 'interpret)
+  (interpret-mode)
   'done)
 
 ;;; for compile number
@@ -358,9 +362,9 @@
                       (r-push! (add1 start)))))))))
 
    ;; 10 0 do code .. loop hoge ;
-   ("[" (lambda () (current-state 'interpret))
+   ("[" interpret-mode
     #:immediate #t)
-   ("]" (lambda () (current-state 'compile)))
+   ("]" compile-mode)
    ("literal" literal
     #:immediate #t
     #:compile-only #t)
@@ -394,7 +398,7 @@
 (define (forth-abort . msgs)
   (d-clear!)
   (r-clear!)
-  (current-state 'interpret)
+  (interpret-mode)
   (display  "FORTH ERROR:" (current-error-port))
   (for-each (cut fprintf (current-error-port) " ~A" <>)
             msgs)
@@ -403,7 +407,7 @@
 (define (forth-abort . msgs)
   (d-clear!)
   (r-clear!)
-  (current-state 'interpret)
+  (interpret-mode)
   (apply error msgs))
 
 (define (forth-interpret token)
